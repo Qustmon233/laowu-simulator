@@ -1083,6 +1083,7 @@ function updateHUD() {
   document.getElementById('rank').textContent = rankOf(credits);
 }
 function startGame() {
+  if (!vw || !vh) resize();   // 兜底：确保画布尺寸已初始化
   fishes = [];
   player = makeFish({
     x: vw / 2, y: vh / 2, r: 16, hue: 192, sat: 95,
@@ -1112,7 +1113,7 @@ document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('restartBtn').addEventListener('click', startGame);
 
 /* ---------------- 启动 ---------------- */
-layoutJoystick();
+resize();               // 关键：先初始化画布尺寸（vw/vh/摇杆布局），否则鱼会全部刷在 (0,0)
 initAmbient();
 for (let i = 0; i < TARGET_FISH; i++) spawnCourse(false);
 
