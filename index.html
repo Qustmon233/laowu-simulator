@@ -54,9 +54,8 @@
 <div class="overlay" id="startScreen">
   <div class="title">老吴模拟器</div>
   <div class="sub">
-    鼠标移动 / 方向键 / <b>屏幕摇杆</b> 控制头像猫<br/>
-    吃掉 <b>比自己小</b> 的课程鱼涨学分，碰上 <b>比自己大</b> 的课程鱼就会"挂科"<br/>
-    <span style="font-size:.82em;color:#9fd8ff">每吃一条鱼：学分 = 鱼的体型 × 2</span>
+    鼠标移动 / 方向键 / <b>屏幕摇杆</b> 控制头像<br/>
+    吃掉 <b>比自己小</b> 的课程鱼涨学分，碰上 <b>比自己大</b> 的课程鱼就会"挂科"
   </div>
   <button class="btn" id="startBtn">开 始</button>
 </div>
@@ -71,12 +70,15 @@
 <script>
 'use strict';
 /* ============================================================
- * 老吴模拟器 · v3.0
+ * 老吴模拟器 · v3.1
  * - 10 门课程 = 10 种大小不同、带课程名的鱼（见 COURSES）
- * - 玩家 = 用户照片头像（player.png）+ 小猫内核（猫耳/胡须）+ 鱼尾
+ * - 玩家 = 用户照片头像（player.png，原图直接用，不做任何改动）+ 摆动的鱼尾
  * - 学分系统：每吃一条鱼 = 鱼的体型 × 2 学分
  * - 学分里程碑彩蛋（不打断游戏）：100 研究生 / 300 硕士 /
- *   500 博士 / 521 满屏爱心 / 750 “你以为你在高考吗，这是学分！”
+ *   500 博士 / 521 只有满屏爱心（不弹文字）/ 750 “你以为你在高考吗，这是学分！”
+ * - 玩家体型超过全部课程鱼后，登场 3 条超级大鱼：
+ *   高级微观 / 计量经济学 / 农业与林业经济管理前沿（都比玩家大）
+ * - 全部鱼都能吃时，触发最终提示：“全球大学自助入校吗，你是学神啊”
  * - 音效：eat.mp4 里提取的语音（运行时解码，挑最响的一段）
  * - 支持鼠标、键盘、手机摇杆（微信内也能玩）
  * ============================================================ */
@@ -110,12 +112,22 @@ const COURSES = [
 ];
 const CREDIT_MULT = 2;   // 学分倍率：学分 = 鱼的体型 × 2
 
+/* ---------------- 超级大鱼：玩家超过全部课程鱼后登场，都比玩家大 ---------------- */
+const SUPER_COURSES = [
+  { name: '高级微观',               hue: 205 },
+  { name: '计量经济学',             hue: 150 },
+  { name: '农业与林业经济管理前沿', hue: 28  }
+];
+const FINAL_TEXT = '全球大学自助入校吗，你是学神啊';
+let superSpawned = false;   // 超级大鱼是否已经登场
+let finalShown = false;     // 最终提示是否已触发
+
 /* ---------------- 学分里程碑 ---------------- */
 const MILESTONES = [
   { c: 100, text: '恭喜你成为研究生',              sub: '老吴离上岸又近了一步！',        kind: 'banner' },
   { c: 300, text: '恭喜你成为硕士',                sub: '学术之路，更上一层楼！',        kind: 'banner' },
   { c: 500, text: '恭喜你成为博士',                sub: '老吴已经是博士啦！',            kind: 'banner' },
-  { c: 521, text: '521 收到满满的爱心',            sub: '整个屏幕都在冒爱心 ❤',          kind: 'hearts' },
+  { c: 521, kind: 'hearts' },   // 只冒爱心，不弹文字
   { c: 750, text: '你以为你在高考吗，这是学分！',  sub: '都 750 分了，别卷了老吴',        kind: 'banner' }
 ];
 
@@ -455,6 +467,12 @@ function update(dt) {
   fishes = fishes.filter(function (f) { return f.alive; });
   if (state === 'playing' && player) updatePlayer(dt);
   if (state === 'playing' && player) handleEating();
+  if (state === 'playing' && player) {
+    // 玩家超过全部课程鱼（最大 56）→ 三条超级大鱼登场
+    if (!superSpawned && player.r > 56.5) spawnSuperFish();
+    // 全部鱼都能吃时给最终提示
+    checkFinalBanner();
+  }
 }
 
 /* 课程鱼 AI：
@@ -586,15 +604,66 @@ function checkMilestones() {
   for (const m of MILESTONES) {
     if (m.done || credits < m.c) continue;
     m.done = true;
-    banner = { text: m.text, sub: m.sub, t: 0, dur: m.c === 750 ? 4.4 : 3.6 };
     if (m.kind === 'hearts') {
-      heartsT = 5.0;
-      for (let i = 0; i < 18; i++) spawnHeart(true);
-    } else {
-      for (let i = 0; i < 10; i++) {
-        particles.push(heartParticle(vw / 2, vh * 0.34));
-      }
+      // 冒爱心的时候不弹文字，只让爱心铺满屏幕
+      heartsT = 7.0;
+      for (let i = 0; i < 22; i++) spawnHeart(true);
+      continue;
     }
+    banner = { text: m.text, sub: m.sub, t: 0, dur: m.c === 750 ? 4.4 : 3.6 };
+    for (let i = 0; i < 10; i++) {
+      particles.push(heartParticle(vw / 2, vh * 0.34));
+    }
+  }
+  checkFinalBanner();
+}
+
+/* ---------------- 超级大鱼登场 / 最终提示 ---------------- */
+// 玩家体型超过全部课程鱼（最大 56）时，登场三条比玩家还大的超级大鱼
+function spawnSuperFish() {
+  superSpawned = true;
+  for (let i = 0; i < SUPER_COURSES.length; i++) {
+    const c = SUPER_COURSES[i];
+    // 比玩家大，又保证玩家之后能长到吃得下（最大 110 < 130 / 1.12）
+    const r = clamp(player.r * (1.28 + i * 0.11), 70, 96 + i * 7);
+    const pos = superSpawnPos(r);
+    fishes.push(makeFish({
+      x: pos.x, y: pos.y, r: r, name: c.name, hue: c.hue, sat: 80,
+      speed: fishSpeed(r), isSuper: true
+    }));
+  }
+  addText(vw / 2, vh * 0.22, '来了三条超级大鱼！', 30);
+}
+// 超级大鱼出生在离玩家最远的角落，避免一登场就怼脸
+function superSpawnPos(r) {
+  const corners = [
+    { x: r + 26, y: r + 26 },
+    { x: vw - r - 26, y: r + 26 },
+    { x: r + 26, y: vh - r - 26 },
+    { x: vw - r - 26, y: vh - r - 26 }
+  ];
+  let best = corners[0], bestD = -1;
+  for (const p of corners) {
+    p.x = clamp(p.x, r + 2, vw - r - 2);
+    p.y = clamp(p.y, r + 2, vh - r - 2);
+    const d = player ? Math.hypot(p.x - player.x, p.y - player.y) : 0;
+    if (d > bestD) { bestD = d; best = p; }
+  }
+  const others = corners.filter(function (p) { return p !== best; });
+  const pick = Math.random() < 0.55 ? best : others[Math.floor(Math.random() * others.length)];
+  return {
+    x: clamp(pick.x + rand(-18, 18), r + 2, vw - r - 2),
+    y: clamp(pick.y + rand(-18, 18), r + 2, vh - r - 2)
+  };
+}
+// 场上所有鱼都能被吃掉（玩家体型 ≥ 最大鱼 × 1.12）时，给最终提示
+function checkFinalBanner() {
+  if (finalShown || !superSpawned || !player || !player.alive) return;
+  let maxR = 0;
+  for (const f of fishes) if (f.alive && f.r > maxR) maxR = f.r;
+  if (maxR > 0 && player.r >= maxR * 1.12) {
+    finalShown = true;
+    banner = { text: FINAL_TEXT, sub: '', t: 0, dur: 6.2 };
   }
 }
 
@@ -898,6 +967,15 @@ function drawFish(f) {
   ctx.strokeStyle = hsla(hue, sat, 25, 0.55);
   ctx.lineWidth = Math.max(1.2, r * 0.045);
   ctx.stroke();
+
+  // 超级大鱼：金色描边，一眼看出是狠角色
+  if (f.isSuper) {
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 1.03, r * 0.75, 0, 0, TAU);
+    ctx.strokeStyle = 'rgba(255, 216, 96, 0.95)';
+    ctx.lineWidth = Math.max(2, r * 0.05);
+    ctx.stroke();
+  }
   ctx.restore();
 
   // 课程名文字（屏幕坐标画，永远水平可读）
@@ -931,7 +1009,7 @@ function drawCourseLabel(f) {
   ctx.restore();
 }
 
-// 玩家：圆形照片头像 + 猫耳 + 胡须 + 摆动的鱼尾（老吴 = 小猫内核）
+// 玩家：圆形照片头像（原图直接用，不改动）+ 摆动的鱼尾
 function drawPlayer(f) {
   const r = f.r;
   const fl = Math.sin(f.tail) * r * 0.22;
@@ -958,11 +1036,7 @@ function drawPlayer(f) {
   ctx.stroke();
   ctx.restore();
 
-  // ---- 猫耳（在圆形后面先画，让底边藏在头像后） ----
-  catEar(-1);
-  catEar(1);
-
-  // ---- 圆形头像 ----
+  // ---- 圆形头像（照片原图，不做任何涂改） ----
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, TAU);
   ctx.closePath();
@@ -989,20 +1063,6 @@ function drawPlayer(f) {
   }
   ctx.restore();
 
-  // ---- 胡须 ----
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.lineWidth = Math.max(1, r * 0.028);
-  ctx.lineCap = 'round';
-  for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < 3; i++) {
-      const y = r * (0.05 + i * 0.14);
-      ctx.beginPath();
-      ctx.moveTo(side * r * 0.58, y);
-      ctx.quadraticCurveTo(side * r * 0.95, y - r * 0.04, side * r * 1.22, y - r * (0.10 - i * 0.08));
-      ctx.stroke();
-    }
-  }
-
   // ---- 描边 + 外光环 ----
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, TAU);
@@ -1015,36 +1075,6 @@ function drawPlayer(f) {
   ctx.lineWidth = Math.max(2, r * 0.045);
   ctx.stroke();
   ctx.restore();
-}
-
-// 猫耳：side = -1 左耳 / 1 右耳
-function catEar(side) {
-  const r = player.r;
-  const bx = side * r * 0.52;   // 耳根中心 x
-  const by = -r * 0.78;         // 耳根中心 y
-  // 三角形：外侧底、内侧底、尖
-  const p1x = bx + side * r * 0.34, p1y = by + r * 0.16;
-  const p2x = bx - side * r * 0.30, p2y = by + r * 0.10;
-  const p3x = bx + side * r * 0.14, p3y = -r * 1.52;
-  ctx.beginPath();
-  ctx.moveTo(p1x, p1y);
-  ctx.quadraticCurveTo(p1x + side * r * 0.10, -r * 1.32, p3x, p3y);
-  ctx.quadraticCurveTo(p2x - side * r * 0.10, -r * 1.18, p2x, p2y);
-  ctx.closePath();
-  ctx.fillStyle = hsla(345, 60, 92, 0.98);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.lineWidth = Math.max(1.5, r * 0.045);
-  ctx.stroke();
-  // 内耳粉色
-  ctx.beginPath();
-  const ix = bx + side * r * 0.06, iy = by + r * 0.02;
-  ctx.moveTo(ix + side * r * 0.16, iy + r * 0.10);
-  ctx.quadraticCurveTo(ix + side * r * 0.10, -r * 1.10, ix + side * r * 0.02, -r * 1.34);
-  ctx.quadraticCurveTo(ix - side * r * 0.12, -r * 1.02, ix - side * r * 0.14, iy + r * 0.08);
-  ctx.closePath();
-  ctx.fillStyle = hsla(345, 80, 74, 0.95);
-  ctx.fill();
 }
 
 /* ---------------- 开始 / 结束 ---------------- */
@@ -1062,6 +1092,8 @@ function startGame() {
   eaten = 0;
   credits = 0;
   for (const m of MILESTONES) m.done = false;
+  superSpawned = false;
+  finalShown = false;
   banner = null;
   hearts = [];
   heartsT = 0;
@@ -1101,7 +1133,7 @@ requestAnimationFrame(frame);
 if (location.hash === '#selftest') {
   window.onerror = function (msg) { document.title = 'ERR ' + msg; return false; };
   let stDied = false;
-  const seen = { b100: false, b300: false, b500: false, h521: false, b750: false };
+  const seen = { b100: false, b300: false, b500: false, h521: false, b750: false, super: false, final: false };
   setTimeout(function () {
     try { document.getElementById('startBtn').click(); } catch (e) {}
   }, 300);
@@ -1111,7 +1143,7 @@ if (location.hash === '#selftest') {
     if (state === 'over') {
       if (!stDied) {
         stDied = true;
-        document.title = 'SELFTEST5 FAIL died eaten=' + eaten + ' credits=' + credits;
+        document.title = 'SELFTEST6 FAIL died eaten=' + eaten + ' credits=' + credits;
       }
       return;
     }
@@ -1122,26 +1154,29 @@ if (location.hash === '#selftest') {
     player.y = vh / 2;
     // 直接用真实进食代码路径"喂"鱼，测试学分/里程碑/音效
     eatCourse({ x: player.x, y: player.y, hue: 210, r: 30, alive: true });
-    // 记录里程碑是否触发
+    // 记录里程碑/超级大鱼/最终提示是否触发
     if (banner && banner.text) {
       if (banner.text.indexOf('研究生') >= 0) seen.b100 = true;
       if (banner.text.indexOf('硕士')   >= 0) seen.b300 = true;
       if (banner.text.indexOf('博士')   >= 0) seen.b500 = true;
       if (banner.text.indexOf('高考')   >= 0) seen.b750 = true;
+      if (banner.text.indexOf('学神')   >= 0) seen.final = true;
     }
     if (heartsT > 0 || hearts.length > 0) seen.h521 = true;
-    if (credits >= 760 && seen.b750) {
+    if (superSpawned) seen.super = true;
+    const done = seen.b100 && seen.b300 && seen.b500 && seen.h521 && seen.b750 && seen.super && seen.final;
+    if (done) {
       clearInterval(stIv);
-      document.title = 'SELFTEST5 PASS credits=' + credits +
+      document.title = 'SELFTEST6 PASS credits=' + credits + ' r=' + Math.round(player.r) +
         ' b100=' + seen.b100 + ' b300=' + seen.b300 + ' b500=' + seen.b500 +
-        ' h521=' + seen.h521 + ' b750=' + seen.b750 +
+        ' h521=' + seen.h521 + ' b750=' + seen.b750 + ' super=' + seen.super + ' final=' + seen.final +
         ' audio=' + (AUDIO.ok ? 'buf' : (AUDIO.ctx ? 'ctx-nobuf' : (AUDIO.fallback ? 'fallback' : 'none')));
     }
-    if (stTicks > 900) {
+    if (stTicks > 220) {
       clearInterval(stIv);
-      document.title = 'SELFTEST5 TIMEOUT credits=' + credits +
+      document.title = 'SELFTEST6 TIMEOUT credits=' + credits + ' r=' + Math.round(player.r) +
         ' b100=' + seen.b100 + ' b300=' + seen.b300 + ' b500=' + seen.b500 +
-        ' h521=' + seen.h521 + ' b750=' + seen.b750;
+        ' h521=' + seen.h521 + ' b750=' + seen.b750 + ' super=' + seen.super + ' final=' + seen.final;
     }
   }, 120);
 }
