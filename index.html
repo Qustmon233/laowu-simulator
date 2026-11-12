@@ -935,42 +935,70 @@ function drawBanner() {
   if (a <= 0) return;
   const isHearts = banner.text.indexOf('爱心') >= 0;
   const baseFs = clamp(Math.min(vw, vh) * 0.082, 22, 54);
+  const FONT = '"Microsoft YaHei", "PingFang SC", sans-serif';
   ctx.save();
   ctx.globalAlpha = a;
   ctx.translate(vw / 2, vh * 0.32);
-  const scale = 1 + 0.08 * Math.max(0, 1 - t / 0.4);
+  const scale = 1 + 0.04 * Math.max(0, 1 - t / 0.4);
   ctx.scale(scale, scale);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = '900 ' + baseFs + 'px "Microsoft YaHei", "PingFang SC", sans-serif';
-  const tw = ctx.measureText(banner.text).width;
-  let fs = baseFs;
-  if (tw > vw * 0.86) {
-    fs = baseFs * (vw * 0.86 / tw);
-    ctx.font = '900 ' + fs + 'px "Microsoft YaHei", "PingFang SC", sans-serif';
+
+  // 长句在窄屏上折成两行，避免被屏幕边缘裁掉（短句保持一行）
+  let lines = [banner.text];
+  if (banner.text.length >= 9) {
+    const cut = banner.text.indexOf('，');
+    if (cut > 2 && cut < banner.text.length - 1) {
+      lines = [banner.text.slice(0, cut + 1), banner.text.slice(cut + 1)];
+    } else if (banner.text.length >= 12) {
+      const mid = Math.ceil(banner.text.length / 2);
+      lines = [banner.text.slice(0, mid), banner.text.slice(mid)];
+    }
   }
-  const w = Math.min(ctx.measureText(banner.text).width, vw * 0.86);
-  const padX = Math.max(26, fs * 0.9), padY = Math.max(12, fs * 0.42);
-  const boxH = padY * 2 + fs * 1.15 + (banner.sub ? fs * 0.55 : 0);
-  roundRectPath(-w / 2 - padX, -padY - fs * 0.72, w + padX * 2, boxH, fs * 0.3);
+
+  // 自适应字号：文字 + 左右内边距 + 弹出动画放大后，整体都要留在屏幕内
+  const padFirst = clamp(baseFs * 0.9, 14, 26);
+  const maxTextW = Math.max(120, (vw - 16) / 1.04 - padFirst * 2);
+  let fs = baseFs;
+  ctx.font = '900 ' + fs + 'px ' + FONT;
+  let maxLineW = 0;
+  for (const ln of lines) maxLineW = Math.max(maxLineW, ctx.measureText(ln).width);
+  if (maxLineW > maxTextW) {
+    fs = Math.max(14, fs * (maxTextW / maxLineW));
+    ctx.font = '900 ' + fs + 'px ' + FONT;
+    maxLineW = 0;
+    for (const ln of lines) maxLineW = Math.max(maxLineW, ctx.measureText(ln).width);
+  }
+
+  const lineH = fs * 1.16;
+  const textH = lineH * lines.length;
+  const padX = clamp(fs * 0.9, 14, 26), padY = Math.max(12, fs * 0.42);
+  const subH = banner.sub ? fs * 0.5 + 8 : 0;
+  const w = Math.min(maxLineW, maxTextW);
+  const boxH = padY * 2 + textH + subH;
+  const boxTop = -textH / 2 - padY;
+  roundRectPath(-w / 2 - padX, boxTop, w + padX * 2, boxH, fs * 0.3);
   ctx.fillStyle = 'rgba(3, 18, 34, 0.68)';
   ctx.fill();
   ctx.lineWidth = Math.max(2, fs * 0.05);
   ctx.strokeStyle = 'rgba(255, 214, 120, 0.85)';
   ctx.stroke();
-  const g = ctx.createLinearGradient(0, -fs * 0.8, 0, fs * 0.6);
+
+  const g = ctx.createLinearGradient(0, -textH / 2 - fs * 0.4, 0, textH / 2 + fs * 0.2);
   g.addColorStop(0, '#fff6c8');
   g.addColorStop(0.55, isHearts ? '#ffd7e6' : '#ffd75e');
   g.addColorStop(1, isHearts ? '#ff8fb5' : '#ff9c3f');
   ctx.fillStyle = g;
   ctx.shadowColor = 'rgba(255, 190, 90, 0.6)';
   ctx.shadowBlur = fs * 0.5;
-  ctx.fillText(banner.text, 0, 0);
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], 0, -textH / 2 + lineH * (i + 0.5));
+  }
   ctx.shadowBlur = 0;
   if (banner.sub) {
-    ctx.font = '600 ' + (fs * 0.4) + 'px "Microsoft YaHei", "PingFang SC", sans-serif';
+    ctx.font = '600 ' + (fs * 0.4) + 'px ' + FONT;
     ctx.fillStyle = 'rgba(255, 240, 205, 0.92)';
-    ctx.fillText(banner.sub, 0, fs * 0.86);
+    ctx.fillText(banner.sub, 0, textH / 2 + subH - 6);
   }
   ctx.restore();
 }
