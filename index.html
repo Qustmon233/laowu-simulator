@@ -72,8 +72,8 @@
 /* ============================================================
  * 老吴模拟器 · v3.1
  * - 10 门课程 = 10 种大小不同、带课程名的鱼（见 COURSES）
- * - 玩家 = 用户照片头像（player.png，原图直接用，不做任何改动）+ 摆动的鱼尾
- * - 学分系统：每吃一条鱼 = 鱼的体型 × 2 学分
+ * - 玩家 = 用户照片头像（player.png，原图直接用，不做任何改动）+ 猫耳 + 摆动的猫尾巴
+ * - 学分系统：每吃一条鱼 = 鱼的体型 × 1.25 学分
  * - 学分里程碑彩蛋（不打断游戏）：100 研究生 / 300 硕士 /
  *   500 博士 / 521 只有满屏爱心（不弹文字）/ 750 “你以为你在高考吗，这是学分！”
  * - 玩家体型超过全部课程鱼后，登场 3 条超级大鱼：
@@ -110,7 +110,7 @@ const COURSES = [
   { name: '习概',               r: 46, hue: 335 },
   { name: '线性代数A',           r: 56, hue: 222 }
 ];
-const CREDIT_MULT = 2;   // 学分倍率：学分 = 鱼的体型 × 2
+const CREDIT_MULT = 1.25;   // 学分倍率：学分 = 鱼的体型 × 1.25
 
 /* ---------------- 超级大鱼：玩家超过全部课程鱼后登场，都比玩家大 ---------------- */
 const SUPER_COURSES = [
@@ -144,7 +144,26 @@ const AUDIO = { ctx: null, buf: null, seg: null, ok: false, muted: false, fallba
 function pickSegment(buf) {
   const dur = buf.duration;
   if (!isFinite(dur) || dur <= 0) return null;
-  if (dur <= 6) return { start: 0, len: Math.max(0.3, dur) };
+  if (dur <= 6) {
+    // 短音频：整段播放，但自动裁掉开头/结尾的静音，避免"吃了半天才出声"
+    const ch = buf.getChannelData(0);
+    const sr = buf.sampleRate;
+    const win = Math.max(16, Math.floor(sr * 0.02));
+    const n = Math.floor(ch.length / win);
+    let first = -1, last = -1;
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let j = 0; j < win; j++) { const v = ch[i * win + j]; s += v * v; }
+      const rms = Math.sqrt(s / win);
+      if (rms > 0.02) { if (first < 0) first = i; last = i; }
+    }
+    if (first >= 0) {
+      const start = Math.max(0, first * 0.02 - 0.05);
+      const end = Math.min(dur, last * 0.02 + 0.15);
+      return { start: start, len: Math.max(0.3, end - start) };
+    }
+    return { start: 0, len: Math.max(0.3, dur) };
+  }
   const ch = buf.getChannelData(0);
   const sr = buf.sampleRate;
   const win = Math.max(16, Math.floor(sr * 0.05));
@@ -206,8 +225,12 @@ function initAudioFallback() {
     AUDIO.fallback = a;
   } catch (e) { AUDIO.fallback = null; }
 }
+let lastEatSoundAt = 0;   // 连续吞鱼时避免声音叠成一片
 function playEatSound() {
   if (AUDIO.muted) return;
+  const now = (window.performance && performance.now) ? performance.now() : Date.now();
+  if (now - lastEatSoundAt < 180) return;   // 180ms 内不重复播放
+  lastEatSoundAt = now;
   try {
     if (AUDIO.ctx && AUDIO.ctx.state === 'suspended') AUDIO.ctx.resume();
   } catch (e) {}
@@ -220,8 +243,8 @@ function playEatSound() {
       const t0 = c.currentTime + 0.01;
       const len = AUDIO.seg.len;
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.85, t0 + 0.02);
-      g.gain.setValueAtTime(0.85, t0 + Math.max(0.06, len - 0.08));
+      g.gain.exponentialRampToValueAtTime(0.95, t0 + 0.02);
+      g.gain.setValueAtTime(0.95, t0 + Math.max(0.06, len - 0.08));
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
       src.connect(g); g.connect(c.destination);
       src.start(t0, AUDIO.seg.start, len);
@@ -235,6 +258,30 @@ function playEatSound() {
       if (p && p.catch) p.catch(function () {});
     } catch (e) {}
   }
+}
+// 冒爱心时的轻声提示音：很轻的三音柔和上行，不喧宾夺主
+function playHeartSound() {
+  if (AUDIO.muted || !AUDIO.ctx) return;
+  try {
+    const c = AUDIO.ctx;
+    if (c.state === 'suspended') c.resume();
+    const notes = [523.25, 659.25, 783.99];   // C6 E6 G6
+    const t0 = c.currentTime + 0.02;
+    for (let i = 0; i < notes.length; i++) {
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = 'sine';
+      o.frequency.value = notes[i];
+      const ts = t0 + i * 0.085;
+      g.gain.setValueAtTime(0.0001, ts);
+      g.gain.exponentialRampToValueAtTime(0.05, ts + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, ts + 1.1);
+      o.connect(g);
+      g.connect(c.destination);
+      o.start(ts);
+      o.stop(ts + 1.2);
+    }
+  } catch (e) {}
 }
 const muteBtn = document.getElementById('muteBtn');
 muteBtn.addEventListener('click', function (e) {
@@ -548,8 +595,11 @@ function updatePlayer(dt) {
       const L = Math.hypot(kx, ky);
       tx = player.x + (kx / L) * 500;
       ty = player.y + (ky / L) * 500;
-    } else {
+    } else if (mouse.has) {
       tx = mouse.x; ty = mouse.y;
+    } else {
+      // 还没移动过鼠标（刚点开始）：原地不动，避免一开局冲向屏幕角落
+      tx = player.x; ty = player.y;
     }
     const dx = tx - player.x, dy = ty - player.y;
     const dist = Math.hypot(dx, dy);
@@ -615,9 +665,10 @@ function checkMilestones() {
     if (m.done || credits < m.c) continue;
     m.done = true;
     if (m.kind === 'hearts') {
-      // 冒爱心的时候不弹文字，只让爱心铺满屏幕
+      // 冒爱心的时候不弹文字，只让爱心铺满屏幕（配一声很轻的提示音）
       heartsT = 7.0;
       for (let i = 0; i < 22; i++) spawnHeart(true);
+      playHeartSound();
       continue;
     }
     banner = { text: m.text, sub: m.sub, t: 0, dur: m.c === 750 ? 4.4 : 3.6 };
@@ -1024,31 +1075,75 @@ function drawCourseLabel(f) {
 }
 
 // 玩家：圆形照片头像（原图直接用，不改动）+ 摆动的鱼尾
+// 一只猫耳朵：side = -1 左耳 / 1 右耳；耳根藏在照片圆后面，只在头两侧探出来
+function drawCatEar(side, r) {
+  const a = -Math.PI / 2 + side * 0.62;          // 耳朵中心方向：正上方偏左右
+  const ux = Math.cos(a), uy = Math.sin(a);      // 径向（朝外）
+  const px = -uy, py = ux;                       // 切向
+  const bx = ux * r * 0.94, by = uy * r * 0.94;  // 耳根中心（贴着圆边）
+  const wBase = r * 0.34;
+  const hEar = r * 0.66;
+  const b1x = bx + px * wBase, b1y = by + py * wBase;
+  const b2x = bx - px * wBase, b2y = by - py * wBase;
+  const tx = bx + ux * hEar, ty = by + uy * hEar;
+  ctx.beginPath();
+  ctx.moveTo(b1x, b1y);
+  ctx.quadraticCurveTo(bx + ux * hEar * 0.5 + px * wBase * 0.55,
+                       by + uy * hEar * 0.5 + py * wBase * 0.55, tx, ty);
+  ctx.quadraticCurveTo(bx + ux * hEar * 0.5 - px * wBase * 0.55,
+                       by + uy * hEar * 0.5 - py * wBase * 0.55, b2x, b2y);
+  ctx.closePath();
+  ctx.fillStyle = '#fbf1e6';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(130, 96, 72, 0.35)';
+  ctx.lineWidth = Math.max(1.2, r * 0.03);
+  ctx.stroke();
+  // 内耳（粉色）
+  const k = 0.52;
+  ctx.beginPath();
+  ctx.moveTo(bx + px * wBase * k, by + py * wBase * k);
+  ctx.quadraticCurveTo(bx + ux * hEar * 0.34 + px * wBase * 0.3,
+                       by + uy * hEar * 0.34 + py * wBase * 0.3,
+                       bx + ux * hEar * 0.6, by + uy * hEar * 0.6);
+  ctx.quadraticCurveTo(bx + ux * hEar * 0.34 - px * wBase * 0.3,
+                       by + uy * hEar * 0.34 - py * wBase * 0.3,
+                       bx - px * wBase * k, by - py * wBase * k);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(246, 168, 190, 0.9)';
+  ctx.fill();
+}
+
 function drawPlayer(f) {
   const r = f.r;
-  const fl = Math.sin(f.tail) * r * 0.22;
+  const sway = Math.sin(f.tail) * r * 0.16;   // 尾巴轻轻摆动
   ctx.save();
   ctx.translate(f.x, f.y);
 
-  // ---- 鱼尾：朝向运动反方向 ----
+  // ---- 猫尾巴：在身后，朝运动反方向，慢慢摆动 ----
   ctx.save();
   ctx.rotate(f.angle + Math.PI);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   ctx.beginPath();
-  ctx.moveTo(r * 0.5, 0);
-  ctx.quadraticCurveTo(r * 1.1, -r * 0.66 - fl, r * 1.62, -r * 0.8 - fl);
-  ctx.lineTo(r * 1.38, 0);
-  ctx.lineTo(r * 1.62, r * 0.8 + fl);
-  ctx.quadraticCurveTo(r * 1.1, r * 0.66 + fl, r * 0.5, 0);
-  ctx.closePath();
-  const tg = ctx.createLinearGradient(r * 0.5, 0, r * 1.62, 0);
-  tg.addColorStop(0, hsla(192, 95, 62, 0.95));
-  tg.addColorStop(1, hsla(192, 95, 40, 0.95));
-  ctx.fillStyle = tg;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-  ctx.lineWidth = Math.max(1.5, r * 0.045);
+  ctx.moveTo(r * 0.66, 0);
+  ctx.quadraticCurveTo(r * 1.42, r * 0.18 + sway, r * 1.88, -r * 0.28 + sway);
+  ctx.quadraticCurveTo(r * 2.16, -r * 0.66 + sway, r * 1.84, -r * 0.96 + sway);
+  ctx.strokeStyle = 'rgba(150, 112, 86, 0.26)';
+  ctx.lineWidth = Math.max(5, r * 0.32);
   ctx.stroke();
+  ctx.strokeStyle = '#fbf1e6';
+  ctx.lineWidth = Math.max(3.5, r * 0.24);
+  ctx.stroke();
+  // 尾巴尖（暖橘色）
+  ctx.beginPath();
+  ctx.arc(r * 1.84, -r * 0.96 + sway, Math.max(2.5, r * 0.12), 0, TAU);
+  ctx.fillStyle = '#f5bd90';
+  ctx.fill();
   ctx.restore();
+
+  // ---- 猫耳朵（从照片头像后面探出来，照片本体不受影响） ----
+  drawCatEar(-1, r);
+  drawCatEar(1, r);
 
   // ---- 圆形头像（照片原图，不做任何涂改） ----
   ctx.beginPath();
