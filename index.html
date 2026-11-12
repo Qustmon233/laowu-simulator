@@ -481,6 +481,16 @@ function update(dt) {
  *  - 比玩家小的鱼会躲玩家；
  *  - 其余时候悠闲漫游。 */
 function updateAI(f, dt) {
+  // 超级大鱼入场阶段：从屏幕外沿直线慢慢游进来，不追击、不反弹
+  if (f.entering) {
+    f.speed = 30;
+    f.x += Math.cos(f.entryAngle) * f.speed * dt;
+    f.y += Math.sin(f.entryAngle) * f.speed * dt;
+    f.tail += dt * 1.6;
+    steer(f, f.entryAngle, dt, 2.4);
+    if (f.x > 0 && f.x < vw && f.y > 0 && f.y < vh) f.entering = false;
+    return;
+  }
   let tgt = f.wander;
   let sp = fishSpeed(f.r);
   let chasing = false;
@@ -619,42 +629,46 @@ function checkMilestones() {
 }
 
 /* ---------------- 超级大鱼登场 / 最终提示 ---------------- */
-// 玩家体型超过全部课程鱼（最大 56）时，登场三条比玩家还大的超级大鱼
+// 玩家体型超过全部课程鱼（最大 56）时，三条超级大鱼从屏幕外慢慢游进来
 function spawnSuperFish() {
   superSpawned = true;
+  const baseEdge = farthestEdge();
   for (let i = 0; i < SUPER_COURSES.length; i++) {
     const c = SUPER_COURSES[i];
     // 比玩家大，又保证玩家之后能长到吃得下（最大 110 < 130 / 1.12）
     const r = clamp(player.r * (1.28 + i * 0.11), 70, 96 + i * 7);
-    const pos = superSpawnPos(r);
+    const e = superEntryPos(r, (baseEdge + i) % 4);
     fishes.push(makeFish({
-      x: pos.x, y: pos.y, r: r, name: c.name, hue: c.hue, sat: 80,
-      speed: fishSpeed(r), isSuper: true
+      x: e.x, y: e.y, r: r, name: c.name, hue: c.hue, sat: 80,
+      speed: 30, isSuper: true, entering: true, entryAngle: e.angle,
+      wander: e.angle
     }));
   }
   addText(vw / 2, vh * 0.22, '来了三条超级大鱼！', 30);
 }
-// 超级大鱼出生在离玩家最远的角落，避免一登场就怼脸
-function superSpawnPos(r) {
-  const corners = [
-    { x: r + 26, y: r + 26 },
-    { x: vw - r - 26, y: r + 26 },
-    { x: r + 26, y: vh - r - 26 },
-    { x: vw - r - 26, y: vh - r - 26 }
+
+// 离玩家最远的那条边（0=左 1=右 2=上 3=下）
+function farthestEdge() {
+  if (!player) return 0;
+  const mids = [
+    { x: 0, y: vh / 2 }, { x: vw, y: vh / 2 },
+    { x: vw / 2, y: 0 }, { x: vw / 2, y: vh }
   ];
-  let best = corners[0], bestD = -1;
-  for (const p of corners) {
-    p.x = clamp(p.x, r + 2, vw - r - 2);
-    p.y = clamp(p.y, r + 2, vh - r - 2);
-    const d = player ? Math.hypot(p.x - player.x, p.y - player.y) : 0;
-    if (d > bestD) { bestD = d; best = p; }
+  let best = 0, bestD = -1;
+  for (let i = 0; i < 4; i++) {
+    const d = Math.hypot(mids[i].x - player.x, mids[i].y - player.y);
+    if (d > bestD) { bestD = d; best = i; }
   }
-  const others = corners.filter(function (p) { return p !== best; });
-  const pick = Math.random() < 0.55 ? best : others[Math.floor(Math.random() * others.length)];
-  return {
-    x: clamp(pick.x + rand(-18, 18), r + 2, vw - r - 2),
-    y: clamp(pick.y + rand(-18, 18), r + 2, vh - r - 2)
-  };
+  return best;
+}
+
+// 屏幕外的入场点 + 朝屏幕内的方向（左→右 / 右→左 / 上→下 / 下→上）
+function superEntryPos(r, edge) {
+  const pad = 24;
+  if (edge === 0) return { x: -r - pad, y: rand(vh * 0.22, vh * 0.78), angle: 0 };
+  if (edge === 1) return { x: vw + r + pad, y: rand(vh * 0.22, vh * 0.78), angle: Math.PI };
+  if (edge === 2) return { x: rand(vw * 0.22, vw * 0.78), y: -r - pad, angle: Math.PI / 2 };
+  return { x: rand(vw * 0.22, vw * 0.78), y: vh + r + pad, angle: -Math.PI / 2 };
 }
 // 场上所有鱼都能被吃掉（玩家体型 ≥ 最大鱼 × 1.12）时，给最终提示
 function checkFinalBanner() {
